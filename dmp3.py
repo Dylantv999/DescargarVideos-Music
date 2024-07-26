@@ -16,11 +16,12 @@ def download_video():
         messagebox.showerror("Error", "Por favor, introduce la URL del video de YouTube y selecciona una carpeta de destino.")
         return
     
-    # Configuración de yt-dlp para descargar videos
+    # Configuración de yt-dlp para descargar el mejor formato disponible sin combinación
     ydl_opts = {
         'format': 'best',
         'outtmpl': f'{output_path}/%(title)s.%(ext)s',
-        'progress_hooks': [on_progress]
+        'progress_hooks': [on_progress],
+        'noplaylist': True  # No descargar listas de reproducción
     }
     
     try:
