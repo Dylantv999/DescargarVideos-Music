@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 import yt_dlp
 import os
 from datetime import datetime
@@ -23,7 +23,7 @@ def download_video():
         global downloaded_file
         
         ydl_opts = {
-            'format': format_combobox.get(),
+            'format': 'best',  # Descargar el mejor formato de video
             'outtmpl': f'{output_path}/%(title)s.%(ext)s',
             'progress_hooks': [on_progress],
             'noplaylist': True  # No descargar listas de reproducción
@@ -63,7 +63,7 @@ def download_audio():
         global downloaded_file
         
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio/best',  # Descargar el mejor formato de audio
             'outtmpl': f'{output_path}/%(title)s.%(ext)s',
             'progress_hooks': [on_progress]
         }
@@ -120,17 +120,12 @@ output_path_entry.grid(row=1, column=1, padx=10, pady=10)
 browse_button = tk.Button(root, text="Buscar...", command=browse_folder)
 browse_button.grid(row=1, column=2, padx=10, pady=10)
 
-# Añadir opción para seleccionar el tipo de descarga
-tk.Label(root, text="Tipo de descarga:").grid(row=2, column=0, padx=10, pady=10)
-format_combobox = ttk.Combobox(root, values=['best', 'bestaudio/best'])
-format_combobox.set('best')  # Valor por defecto
-format_combobox.grid(row=2, column=1, padx=10, pady=10)
-
+# Botones para descargar video y audio
 download_video_button = tk.Button(root, text="Descargar Video", command=download_video)
-download_video_button.grid(row=3, column=0, columnspan=3, pady=20)
+download_video_button.grid(row=2, column=0, columnspan=3, pady=20)
 
 download_audio_button = tk.Button(root, text="Descargar Audio", command=download_audio)
-download_audio_button.grid(row=4, column=0, columnspan=3, pady=20)
+download_audio_button.grid(row=3, column=0, columnspan=3, pady=20)
 
 # Ejecutar el bucle principal de la aplicación
 root.mainloop()
