@@ -1,165 +1,176 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import sys
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, QProgressBar
+from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
 import os
 from datetime import datetime
-import threading
 
-# Variables globales
-downloaded_file = None
-download_complete_event = threading.Event()
-current_progress = 0
+class DownloadThread(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(str)
 
-def update_progress_bar(value):
-    progress_bar['value'] = value
-    root.update_idletasks()
+    def __init__(self, url, output_path, is_video=True, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.output_path = output_path
+        self.is_video = is_video
 
-def reset_progress_bar():
-    progress_bar['value'] = 0
-    root.update_idletasks()
-
-def download_video():
-    global downloaded_file
-
-    youtube_url = url_entry.get()
-    output_path = output_path_entry.get()
-
-    if not youtube_url or not output_path:
-        messagebox.showerror("Error", "Por favor, introduce la URL del video de YouTube y selecciona una carpeta de destino.")
-        return
-
-    def download_task():
-        global downloaded_file
-        
+    def run(self):
         ydl_opts = {
-            'format': 'best',  # Descargar el mejor formato de video
-            'outtmpl': f'{output_path}/%(title)s.%(ext)s',
-            'progress_hooks': [on_progress],
-            'noplaylist': True  # No descargar listas de reproducción
+            'format': 'best' if self.is_video else 'bestaudio/best',
+            'outtmpl': f'{self.output_path}/%(title)s.%(ext)s',
+            'progress_hooks': [self.yt_progress_hook],
+            'noplaylist': True
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
-            
-            # Esperar a que se complete la descarga
-            download_complete_event.wait()
-
-            if downloaded_file:
-                # Cambiar la fecha de modificación del archivo descargado a la fecha actual
-                file_path = os.path.join(output_path, downloaded_file)
-                current_time = datetime.now().timestamp()
-                os.utime(file_path, (current_time, current_time))
-                
-            messagebox.showinfo("Éxito", "Video descargado con éxito.")
+                ydl.download([self.url])
         except Exception as e:
-            messagebox.showerror("Error", f"Se produjo un error: {e}")
+            self.finished.emit(str(e))
 
-        reset_progress_bar()
+    def yt_progress_hook(self, d):
+        if d['status'] == 'downloading':
+            total_bytes = d.get('total_bytes', 0)
+            downloaded_bytes = d.get('downloaded_bytes', 0)
+            if total_bytes > 0:
+                progress = int(downloaded_bytes / total_bytes * 100)
+                self.progress.emit(progress)
+        elif d['status'] == 'finished':
+            self.finished.emit(d['filename'])
 
-    # Ejecutar la tarea de descarga en un hilo separado
-    threading.Thread(target=download_task).start()
+class YouTubeDownloader(QWidget):
+    def __init__(self):
+        super().__init__()
 
-def download_audio():
-    global downloaded_file, current_progress
+        self.initUI()
 
-    youtube_url = url_entry.get()
-    output_path = output_path_entry.get()
+    def initUI(self):
+        self.setWindowTitle('YouTube Downloader')
+        self.setGeometry(100, 100, 400, 200)
 
-    if not youtube_url or not output_path:
-        messagebox.showerror("Error", "Por favor, introduce la URL del video de YouTube y selecciona una carpeta de destino.")
-        return
+        layout = QVBoxLayout()
 
-    def download_task():
-        global downloaded_file
-        
-        ydl_opts = {
-            'format': 'bestaudio/best',  # Descargar el mejor formato de audio
-            'outtmpl': f'{output_path}/%(title)s.%(ext)s',
-            'progress_hooks': [on_progress],
-            'noplaylist': True  # No descargar listas de reproducción
+        # URL del video
+        url_layout = QHBoxLayout()
+        self.url_label = QLabel('URL del video de YouTube:')
+        self.url_entry = QLineEdit()
+        url_layout.addWidget(self.url_label)
+        url_layout.addWidget(self.url_entry)
+        layout.addLayout(url_layout)
+
+        # Carpeta de destino
+        path_layout = QHBoxLayout()
+        self.path_label = QLabel('Carpeta de destino:')
+        self.path_entry = QLineEdit()
+        self.path_button = QPushButton('Buscar...')
+        self.path_button.clicked.connect(self.browse_folder)
+        path_layout.addWidget(self.path_label)
+        path_layout.addWidget(self.path_entry)
+        path_layout.addWidget(self.path_button)
+        layout.addLayout(path_layout)
+
+        # Botones de descarga
+        button_layout = QHBoxLayout()
+        self.download_video_button = QPushButton('Descargar Video')
+        self.download_video_button.clicked.connect(self.download_video)
+        self.download_audio_button = QPushButton('Descargar Audio')
+        self.download_audio_button.clicked.connect(self.download_audio)
+        button_layout.addWidget(self.download_video_button)
+        button_layout.addWidget(self.download_audio_button)
+        layout.addLayout(button_layout)
+
+        # Barra de progreso
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
+
+        self.setLayout(layout)
+
+    def browse_folder(self):
+        folder_selected = QFileDialog.getExistingDirectory(self, 'Seleccionar carpeta de destino')
+        if folder_selected:
+            self.path_entry.setText(folder_selected)
+
+    def download_video(self):
+        self.start_download(is_video=True)
+
+    def download_audio(self):
+        self.start_download(is_video=False)
+
+    def start_download(self, is_video):
+        url = self.url_entry.text()
+        output_path = self.path_entry.text()
+
+        if not url or not output_path:
+            QMessageBox.critical(self, 'Error', 'Por favor, introduce la URL del video de YouTube y selecciona una carpeta de destino.')
+            return
+
+        self.progress_bar.setValue(0)
+        self.download_thread = DownloadThread(url, output_path, is_video)
+        self.download_thread.progress.connect(self.update_progress)
+        self.download_thread.finished.connect(self.download_finished)
+        self.download_thread.start()
+
+    def update_progress(self, value):
+        self.progress_bar.setValue(value)
+
+    def download_finished(self, filename):
+        if filename.endswith('.webm') and not self.download_thread.is_video:
+            self.convert_to_mp3(filename)
+        else:
+            QMessageBox.information(self, 'Éxito', 'Descarga completada con éxito.')
+
+    def convert_to_mp3(self, webm_file):
+        mp3_file = webm_file.rsplit('.', 1)[0] + '.mp3'
+        os.system(f'ffmpeg -i "{webm_file}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file}"')
+        os.remove(webm_file)
+        QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
+
+if __name__ == '__main__':
+    style_sheet = """
+        QWidget {
+            background-color: #2E3440;
+            color: #D8DEE9;
+            font-size: 14px;
         }
+        QLineEdit {
+            background-color: #4C566A;
+            border: 1px solid #D8DEE9;
+            border-radius: 5px;
+            padding: 5px;
+            color: #D8DEE9;
+        }
+        QPushButton {
+            background-color: #5E81AC;
+            border: none;
+            border-radius: 5px;
+            padding: 10px;
+            color: #ECEFF4;
+        }
+        QPushButton:hover {
+            background-color: #81A1C1;
+        }
+        QProgressBar {
+            border: 1px solid #D8DEE9;
+            border-radius: 5px;
+            text-align: center;
+            background-color: #4C566A;
+        }
+        QProgressBar::chunk {
+            background-color: #88C0D0;
+            border-radius: 5px;
+        }
+        QLabel {
+            font-weight: bold;
+        }
+        QFileDialog {
+            background-color: #2E3440;
+            color: #D8DEE9;
+        }
+    """
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([youtube_url])
-            
-            # Esperar a que se complete la descarga
-            download_complete_event.wait()
-
-            if downloaded_file:
-                # Cambiar la fecha de modificación del archivo descargado a la fecha actual
-                file_path = os.path.join(output_path, downloaded_file)
-                current_time = datetime.now().timestamp()
-                os.utime(file_path, (current_time, current_time))
-
-                # Ocultar el archivo descargado
-                os.system(f'attrib +h "{file_path}"')
-
-                # Convertir a mp3 usando ffmpeg
-                mp3_file_path = file_path.rsplit('.', 1)[0] + '.mp3'
-                os.system(f'ffmpeg -i "{file_path}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file_path}"')
-
-                # Eliminar el archivo webm original
-                os.remove(file_path)
-                
-                # Hacer visible el archivo mp3 final
-                os.system(f'attrib -h "{mp3_file_path}"')
-                
-            messagebox.showinfo("Éxito", "Audio descargado y convertido a MP3 con éxito.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Se produjo un error: {e}")
-
-        reset_progress_bar()
-
-    # Ejecutar la tarea de descarga en un hilo separado
-    threading.Thread(target=download_task).start()
-
-def on_progress(d):
-    global downloaded_file, current_progress
-    if d['status'] == 'downloading':
-        current_progress = d.get('downloaded_bytes', 0) / d.get('total_bytes', 1) * 100
-        update_progress_bar(current_progress)
-    elif d['status'] == 'finished':
-        downloaded_file = d['filename']
-        download_complete_event.set()  # Indicar que la descarga ha terminado
-        update_progress_bar(100)
-
-def browse_folder():
-    folder_selected = filedialog.askdirectory()
-    if folder_selected:
-        output_path_entry.delete(0, tk.END)
-        output_path_entry.insert(0, folder_selected)
-
-# Obtener la carpeta de descargas por defecto
-default_download_path = os.path.join(os.path.expanduser('~'), 'Downloads')
-
-# Crear la ventana principal
-root = tk.Tk()
-root.title("YouTube Downloader")
-
-# Crear y colocar los widgets
-tk.Label(root, text="URL del video de YouTube:").grid(row=0, column=0, padx=10, pady=10)
-url_entry = tk.Entry(root, width=50)
-url_entry.grid(row=0, column=1, padx=10, pady=10)
-
-tk.Label(root, text="Carpeta de destino:").grid(row=1, column=0, padx=10, pady=10)
-output_path_entry = tk.Entry(root, width=50)
-output_path_entry.insert(0, default_download_path)
-output_path_entry.grid(row=1, column=1, padx=10, pady=10)
-browse_button = tk.Button(root, text="Buscar...", command=browse_folder)
-browse_button.grid(row=1, column=2, padx=10, pady=10)
-
-# Botones para descargar video y audio
-download_video_button = tk.Button(root, text="Descargar Video", command=download_video)
-download_video_button.grid(row=2, column=0, columnspan=3, pady=20)
-
-download_audio_button = tk.Button(root, text="Descargar Audio", command=download_audio)
-download_audio_button.grid(row=3, column=0, columnspan=3, pady=20)
-
-# Barra de progreso
-progress_bar = ttk.Progressbar(root, orient="horizontal", length=400, mode="determinate")
-progress_bar.grid(row=4, column=0, columnspan=3, pady=20)
-
-# Ejecutar el bucle principal de la aplicación
-root.mainloop()
+    app = QApplication(sys.argv)
+    app.setStyleSheet(style_sheet)  # Aplica la hoja de estilo
+    downloader = YouTubeDownloader()
+    downloader.show()
+    sys.exit(app.exec_())
