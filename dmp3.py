@@ -1,8 +1,8 @@
 import sys
+import os
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, QProgressBar
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
-import os
 from datetime import datetime
 
 class DownloadThread(QThread):
@@ -47,7 +47,7 @@ class YouTubeDownloader(QWidget):
 
     def initUI(self):
         self.setWindowTitle('YouTube Downloader')
-        self.setGeometry(100, 100, 400, 200)
+        self.setGeometry(100, 100, 700, 400)
 
         layout = QVBoxLayout()
 
@@ -69,6 +69,10 @@ class YouTubeDownloader(QWidget):
         path_layout.addWidget(self.path_entry)
         path_layout.addWidget(self.path_button)
         layout.addLayout(path_layout)
+
+        # Establece la carpeta de descargas por defecto
+        downloads_folder = os.path.expanduser('~/Downloads')
+        self.path_entry.setText(downloads_folder)
 
         # Botones de descarga
         button_layout = QHBoxLayout()
