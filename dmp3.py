@@ -1,35 +1,40 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QMessageBox, QProgressBar
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
-from datetime import datetime
 
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(str)
+    stopped = pyqtSignal()
 
-    def __init__(self, url, output_path, is_video=True, parent=None):
+    def __init__(self, url, output_path, is_video=True, is_playlist=False, parent=None):
         super().__init__(parent)
         self.url = url
         self.output_path = output_path
         self.is_video = is_video
+        self.is_playlist = is_playlist
+        self._is_canceled = False
 
     def run(self):
         ydl_opts = {
-            'format': 'best' if self.is_video else 'bestaudio/best',
-            'outtmpl': f'{self.output_path}/%(title)s.%(ext)s',
+            'format': 'bestaudio/best',
+            'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
             'progress_hooks': [self.yt_progress_hook],
-            'noplaylist': True
+            'noplaylist': not self.is_playlist
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
         except Exception as e:
-            self.finished.emit(str(e))
+            if not self._is_canceled:
+                self.finished.emit(str(e))
 
     def yt_progress_hook(self, d):
+        if self._is_canceled:
+            raise yt_dlp.utils.DownloadError("Canceled")
         if d['status'] == 'downloading':
             total_bytes = d.get('total_bytes', 0)
             downloaded_bytes = d.get('downloaded_bytes', 0)
@@ -38,6 +43,10 @@ class DownloadThread(QThread):
                 self.progress.emit(progress)
         elif d['status'] == 'finished':
             self.finished.emit(d['filename'])
+
+    def cancel(self):
+        self._is_canceled = True
+        self.stopped.emit()
 
 class YouTubeDownloader(QWidget):
     def __init__(self):
@@ -53,7 +62,7 @@ class YouTubeDownloader(QWidget):
 
         # URL del video
         url_layout = QHBoxLayout()
-        self.url_label = QLabel('URL del video de YouTube:')
+        self.url_label = QLabel('URL del video o playlist de YouTube:')
         self.url_entry = QLineEdit()
         url_layout.addWidget(self.url_label)
         url_layout.addWidget(self.url_entry)
@@ -77,11 +86,17 @@ class YouTubeDownloader(QWidget):
         # Botones de descarga
         button_layout = QHBoxLayout()
         self.download_video_button = QPushButton('Descargar Video')
-        self.download_video_button.clicked.connect(self.download_video)
+        self.download_video_button.clicked.connect(lambda: self.start_download(is_video=True, is_playlist=False))
         self.download_audio_button = QPushButton('Descargar Audio')
-        self.download_audio_button.clicked.connect(self.download_audio)
+        self.download_audio_button.clicked.connect(lambda: self.start_download(is_video=False, is_playlist=False))
+        self.download_playlist_button = QPushButton('Descargar Playlist (Audio)')
+        self.download_playlist_button.clicked.connect(lambda: self.start_download(is_video=False, is_playlist=True))
+        self.cancel_button = QPushButton('Cancelar')
+        self.cancel_button.clicked.connect(self.cancel_download)
         button_layout.addWidget(self.download_video_button)
         button_layout.addWidget(self.download_audio_button)
+        button_layout.addWidget(self.download_playlist_button)
+        button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
 
         # Barra de progreso
@@ -89,46 +104,49 @@ class YouTubeDownloader(QWidget):
         layout.addWidget(self.progress_bar)
 
         self.setLayout(layout)
+        self.download_thread = None
 
     def browse_folder(self):
         folder_selected = QFileDialog.getExistingDirectory(self, 'Seleccionar carpeta de destino')
         if folder_selected:
             self.path_entry.setText(folder_selected)
 
-    def download_video(self):
-        self.start_download(is_video=True)
-
-    def download_audio(self):
-        self.start_download(is_video=False)
-
-    def start_download(self, is_video):
+    def start_download(self, is_video, is_playlist):
         url = self.url_entry.text()
         output_path = self.path_entry.text()
 
         if not url or not output_path:
-            QMessageBox.critical(self, 'Error', 'Por favor, introduce la URL del video de YouTube y selecciona una carpeta de destino.')
+            QMessageBox.critical(self, 'Error', 'Por favor, introduce la URL del video o playlist de YouTube y selecciona una carpeta de destino.')
             return
 
         self.progress_bar.setValue(0)
-        self.download_thread = DownloadThread(url, output_path, is_video)
+        self.download_thread = DownloadThread(url, output_path, is_video, is_playlist)
         self.download_thread.progress.connect(self.update_progress)
         self.download_thread.finished.connect(self.download_finished)
+        self.download_thread.stopped.connect(self.download_canceled)
         self.download_thread.start()
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
 
     def download_finished(self, filename):
-        if filename.endswith('.webm') and not self.download_thread.is_video:
+        if filename.endswith('.webm'):
             self.convert_to_mp3(filename)
-        else:
-            QMessageBox.information(self, 'Éxito', 'Descarga completada con éxito.')
+
+    def download_canceled(self):
+        self.download_thread = None
+        self.progress_bar.setValue(0)
+        # Eliminado: QMessageBox.information(self, 'Cancelado', 'Descarga cancelada.')
 
     def convert_to_mp3(self, webm_file):
         mp3_file = webm_file.rsplit('.', 1)[0] + '.mp3'
         os.system(f'ffmpeg -i "{webm_file}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file}"')
         os.remove(webm_file)
-        QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
+        # Eliminado: QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
+
+    def cancel_download(self):
+        if self.download_thread:
+            self.download_thread.cancel()
 
 if __name__ == '__main__':
     style_sheet = """
