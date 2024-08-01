@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, QMessageBox
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
 
@@ -19,10 +19,11 @@ class DownloadThread(QThread):
 
     def run(self):
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestvideo+bestaudio/best' if self.is_video else 'bestaudio/best',
             'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
             'progress_hooks': [self.yt_progress_hook],
-            'noplaylist': not self.is_playlist
+            'noplaylist': not self.is_playlist,
+            'ignoreerrors': True  # Ignorar errores para saltar videos inaccesibles
         }
 
         try:
@@ -51,7 +52,6 @@ class DownloadThread(QThread):
 class YouTubeDownloader(QWidget):
     def __init__(self):
         super().__init__()
-
         self.initUI()
 
     def initUI(self):
@@ -130,19 +130,24 @@ class YouTubeDownloader(QWidget):
         self.progress_bar.setValue(value)
 
     def download_finished(self, filename):
-        if filename.endswith('.webm'):
+        if filename.endswith('.webm') and not self.download_thread.is_video:
             self.convert_to_mp3(filename)
+        else:
+            QMessageBox.information(self, 'Descarga finalizada', 'El archivo se ha descargado correctamente.')
 
     def download_canceled(self):
         self.download_thread = None
         self.progress_bar.setValue(0)
-        # Eliminado: QMessageBox.information(self, 'Cancelado', 'Descarga cancelada.')
+        QMessageBox.information(self, 'Cancelado', 'Descarga cancelada.')
 
     def convert_to_mp3(self, webm_file):
         mp3_file = webm_file.rsplit('.', 1)[0] + '.mp3'
-        os.system(f'ffmpeg -i "{webm_file}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file}"')
-        os.remove(webm_file)
-        # Eliminado: QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
+        try:
+            os.system(f'ffmpeg -i "{webm_file}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file}"')
+            os.remove(webm_file)
+            QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Error al convertir a mp3: {e}')
 
     def cancel_download(self):
         if self.download_thread:
