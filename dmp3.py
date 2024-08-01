@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, QMessageBox
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
 
@@ -18,13 +18,29 @@ class DownloadThread(QThread):
         self._is_canceled = False
 
     def run(self):
-        ydl_opts = {
-            'format': 'bestvideo+bestaudio/best' if self.is_video else 'bestaudio/best',
-            'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
-            'progress_hooks': [self.yt_progress_hook],
-            'noplaylist': not self.is_playlist,
-            'ignoreerrors': True  # Ignorar errores para saltar videos inaccesibles
-        }
+        if not self.is_video:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
+                'progress_hooks': [self.yt_progress_hook],
+                'noplaylist': not self.is_playlist,
+                'ignoreerrors': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'postprocessor_args': ['-ar', '44100'],
+                'prefer_ffmpeg': True
+            }
+        else:
+            ydl_opts = {
+                'format': 'bestvideo+bestaudio/best',
+                'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
+                'progress_hooks': [self.yt_progress_hook],
+                'noplaylist': not self.is_playlist,
+                'ignoreerrors': True
+            }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -116,7 +132,8 @@ class YouTubeDownloader(QWidget):
         output_path = self.path_entry.text()
 
         if not url or not output_path:
-            QMessageBox.critical(self, 'Error', 'Por favor, introduce la URL del video o playlist de YouTube y selecciona una carpeta de destino.')
+            # Mensaje de error sin usar QMessageBox
+            print('Error: Por favor, introduce la URL del video o playlist de YouTube y selecciona una carpeta de destino.')
             return
 
         self.progress_bar.setValue(0)
@@ -130,24 +147,14 @@ class YouTubeDownloader(QWidget):
         self.progress_bar.setValue(value)
 
     def download_finished(self, filename):
-        if filename.endswith('.webm') and not self.download_thread.is_video:
-            self.convert_to_mp3(filename)
-        else:
-            QMessageBox.information(self, 'Descarga finalizada', 'El archivo se ha descargado correctamente.')
+        # Mensaje de éxito sin usar QMessageBox
+        print('Descarga finalizada: El archivo se ha descargado correctamente.')
 
     def download_canceled(self):
         self.download_thread = None
         self.progress_bar.setValue(0)
-        QMessageBox.information(self, 'Cancelado', 'Descarga cancelada.')
-
-    def convert_to_mp3(self, webm_file):
-        mp3_file = webm_file.rsplit('.', 1)[0] + '.mp3'
-        try:
-            os.system(f'ffmpeg -i "{webm_file}" -vn -ar 44100 -ac 2 -b:a 192k "{mp3_file}"')
-            os.remove(webm_file)
-            QMessageBox.information(self, 'Éxito', 'Audio descargado y convertido a mp3 con éxito.')
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Error al convertir a mp3: {e}')
+        # Mensaje de cancelación sin usar QMessageBox
+        print('Descarga cancelada.')
 
     def cancel_download(self):
         if self.download_thread:
