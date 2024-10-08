@@ -3,6 +3,7 @@ import os
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, QComboBox
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
+import ffmpeg
 
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
@@ -20,7 +21,6 @@ class DownloadThread(QThread):
 
     def run(self):
         if not self.is_video:
-            # Ajustar la calidad de audio según la selección
             quality_map = {'Baja': '64', 'Media': '128', 'Alta': '192'}
             selected_quality = quality_map.get(self.quality, '192')
 
@@ -69,6 +69,32 @@ class DownloadThread(QThread):
     def cancel(self):
         self._is_canceled = True
         self.stopped.emit()
+
+class AudioCompressorThread(QThread):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(str)
+
+    def __init__(self, input_folder, output_folder, parent=None):
+        super().__init__(parent)
+        self.input_folder = input_folder
+        self.output_folder = output_folder
+        self._is_canceled = False
+
+    def run(self):
+        # Listar todos los archivos en la carpeta de entrada
+        for filename in os.listdir(self.input_folder):
+            if filename.endswith(('.mp3', '.wav', '.webm', '.m4a')):  # Puedes agregar otros formatos si es necesario
+                input_file = os.path.join(self.input_folder, filename)
+                output_file = os.path.join(self.output_folder, f"{os.path.splitext(filename)[0]}.mp3")  # Cambiar a .mp3
+
+                # Comprimir a MP3
+                try:
+                    ffmpeg.input(input_file).output(output_file, audio_bitrate='96k').run()  # Usar MP3 como formato
+                    self.progress.emit(100)  # Emitir progreso final
+                except Exception as e:
+                    print(f'Error al comprimir {filename}: {str(e)}')
+        
+        self.finished.emit("Compresión de audio finalizada.")
 
 class YouTubeDownloader(QWidget):
     def __init__(self):
@@ -119,11 +145,14 @@ class YouTubeDownloader(QWidget):
         self.download_audio_button.clicked.connect(lambda: self.start_download(is_video=False, is_playlist=False))
         self.download_playlist_button = QPushButton('Descargar Playlist (Audio)')
         self.download_playlist_button.clicked.connect(lambda: self.start_download(is_video=False, is_playlist=True))
+        self.compress_audio_button = QPushButton('Comprimir Audio')
+        self.compress_audio_button.clicked.connect(self.compress_audio)
         self.cancel_button = QPushButton('Cancelar')
         self.cancel_button.clicked.connect(self.cancel_download)
         button_layout.addWidget(self.download_video_button)
         button_layout.addWidget(self.download_audio_button)
         button_layout.addWidget(self.download_playlist_button)
+        button_layout.addWidget(self.compress_audio_button)
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
 
@@ -133,6 +162,7 @@ class YouTubeDownloader(QWidget):
 
         self.setLayout(layout)
         self.download_thread = None
+        self.compress_thread = None
 
     def browse_folder(self):
         folder_selected = QFileDialog.getExistingDirectory(self, 'Seleccionar carpeta de destino')
@@ -148,9 +178,9 @@ class YouTubeDownloader(QWidget):
             print('Error: Por favor, introduce la URL del video o playlist de YouTube y selecciona una carpeta de destino.')
             return
 
-        # Crear la carpeta de destino si no existe (de tipo normal)
+        # Crear la carpeta de destino si no existe
         if not os.path.exists(output_path):
-            os.makedirs(output_path, exist_ok=True)  # Asegura que se cree si no existe
+            os.makedirs(output_path, exist_ok=True)
 
         self.progress_bar.setValue(0)
         self.download_thread = DownloadThread(url, output_path, selected_quality, is_video, is_playlist)
@@ -159,12 +189,28 @@ class YouTubeDownloader(QWidget):
         self.download_thread.stopped.connect(self.download_canceled)
         self.download_thread.start()
 
+    def compress_audio(self):
+        input_folder = self.path_entry.text()
+        output_folder = os.path.join(input_folder, "Comprimidos")  # Carpeta de salida para archivos comprimidos
+
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder, exist_ok=True)
+
+        self.progress_bar.setValue(0)
+        self.compress_thread = AudioCompressorThread(input_folder, output_folder)
+        self.compress_thread.progress.connect(self.update_progress)
+        self.compress_thread.finished.connect(self.compression_finished)
+        self.compress_thread.start()
 
     def update_progress(self, value):
         self.progress_bar.setValue(value)
 
     def download_finished(self, filename):
         print('Descarga finalizada: El archivo se ha descargado correctamente.')
+
+    def compression_finished(self, message):
+        print(message)
+        self.progress_bar.setValue(100)
 
     def download_canceled(self):
         self.download_thread = None
@@ -183,43 +229,30 @@ if __name__ == '__main__':
             font-size: 14px;
         }
         QLineEdit {
-            background-color: #4C566A;
-            border: 1px solid #D8DEE9;
-            border-radius: 5px;
-            padding: 5px;
+            background-color: #3B4252;
             color: #D8DEE9;
+            padding: 5px;
+            border: 1px solid #4C566A;
         }
         QPushButton {
-            background-color: #5E81AC;
+            background-color: #4C566A;
+            color: #D8DEE9;
             border: none;
-            border-radius: 5px;
-            padding: 10px;
-            color: #ECEFF4;
+            padding: 8px;
+            margin: 5px;
+            border-radius: 4px;
         }
         QPushButton:hover {
-            background-color: #81A1C1;
+            background-color: #5E81AC;
         }
         QProgressBar {
-            border: 1px solid #D8DEE9;
-            border-radius: 5px;
-            text-align: center;
-            background-color: #4C566A;
-        }
-        QProgressBar::chunk {
-            background-color: #88C0D0;
-            border-radius: 5px;
-        }
-        QLabel {
-            font-weight: bold;
-        }
-        QFileDialog {
-            background-color: #2E3440;
+            background-color: #3B4252;
             color: #D8DEE9;
+            border: 1px solid #4C566A;
         }
-    """
-
+        """
     app = QApplication(sys.argv)
     app.setStyleSheet(style_sheet)
-    downloader = YouTubeDownloader()
-    downloader.show()
+    window = YouTubeDownloader()
+    window.show()
     sys.exit(app.exec_())
