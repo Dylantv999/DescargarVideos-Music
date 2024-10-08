@@ -1,6 +1,6 @@
 import sys
 import os
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, QComboBox
 from PyQt5.QtCore import QThread, pyqtSignal
 import yt_dlp
 
@@ -9,16 +9,21 @@ class DownloadThread(QThread):
     finished = pyqtSignal(str)
     stopped = pyqtSignal()
 
-    def __init__(self, url, output_path, is_video=True, is_playlist=False, parent=None):
+    def __init__(self, url, output_path, quality, is_video=True, is_playlist=False, parent=None):
         super().__init__(parent)
         self.url = url
         self.output_path = output_path
+        self.quality = quality
         self.is_video = is_video
         self.is_playlist = is_playlist
         self._is_canceled = False
 
     def run(self):
         if not self.is_video:
+            # Ajustar la calidad de audio según la selección
+            quality_map = {'Baja': '64', 'Media': '128', 'Alta': '192'}
+            selected_quality = quality_map.get(self.quality, '192')
+
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': f'{self.output_path}/%(playlist_title)s/%(title)s.%(ext)s' if self.is_playlist else f'{self.output_path}/%(title)s.%(ext)s',
@@ -28,7 +33,7 @@ class DownloadThread(QThread):
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
-                    'preferredquality': '192',
+                    'preferredquality': selected_quality,
                 }],
                 'postprocessor_args': ['-ar', '44100'],
                 'prefer_ffmpeg': True
@@ -99,6 +104,13 @@ class YouTubeDownloader(QWidget):
         downloads_folder = os.path.expanduser('~/Downloads')
         self.path_entry.setText(downloads_folder)
 
+        # Menú desplegable para seleccionar la calidad del audio
+        self.quality_label = QLabel('Calidad de audio:')
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(['Baja', 'Media', 'Alta'])
+        layout.addWidget(self.quality_label)
+        layout.addWidget(self.quality_combo)
+
         # Botones de descarga
         button_layout = QHBoxLayout()
         self.download_video_button = QPushButton('Descargar Video')
@@ -130,30 +142,33 @@ class YouTubeDownloader(QWidget):
     def start_download(self, is_video, is_playlist):
         url = self.url_entry.text()
         output_path = self.path_entry.text()
+        selected_quality = self.quality_combo.currentText()
 
         if not url or not output_path:
-            # Mensaje de error sin usar QMessageBox
             print('Error: Por favor, introduce la URL del video o playlist de YouTube y selecciona una carpeta de destino.')
             return
 
+        # Crear la carpeta de destino si no existe (de tipo normal)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path, exist_ok=True)  # Asegura que se cree si no existe
+
         self.progress_bar.setValue(0)
-        self.download_thread = DownloadThread(url, output_path, is_video, is_playlist)
+        self.download_thread = DownloadThread(url, output_path, selected_quality, is_video, is_playlist)
         self.download_thread.progress.connect(self.update_progress)
         self.download_thread.finished.connect(self.download_finished)
         self.download_thread.stopped.connect(self.download_canceled)
         self.download_thread.start()
 
+
     def update_progress(self, value):
         self.progress_bar.setValue(value)
 
     def download_finished(self, filename):
-        # Mensaje de éxito sin usar QMessageBox
         print('Descarga finalizada: El archivo se ha descargado correctamente.')
 
     def download_canceled(self):
         self.download_thread = None
         self.progress_bar.setValue(0)
-        # Mensaje de cancelación sin usar QMessageBox
         print('Descarga cancelada.')
 
     def cancel_download(self):
@@ -204,7 +219,7 @@ if __name__ == '__main__':
     """
 
     app = QApplication(sys.argv)
-    app.setStyleSheet(style_sheet)  # Aplica la hoja de estilo
+    app.setStyleSheet(style_sheet)
     downloader = YouTubeDownloader()
     downloader.show()
     sys.exit(app.exec_())
